@@ -119,8 +119,9 @@ This spins up the Vite **dev server** in a container — intended for occasional
 **Deploying via Dockhand ("Deploy from Git"):** point it at this repository, leave the compose file path as the default (`docker-compose.yml`), and add `WA_BACKUP_HOST_DIR` as an environment variable in Dockhand's deploy dialog, set to the backup folder path on the host running Dockhand. Leave scheduled sync / webhook off unless you specifically want automatic redeploys.
 
 Notes:
-*   The container only binds to `127.0.0.1:5173` on the host, so it isn't reachable from other machines on your network by default.
-*   The compose file bind-mounts the project source into the container for live-reload; your backup folder is mounted **read-only** at `/backup` inside the container.
+*   The image bakes in the source code at build time (no live-reload) — fine for occasional use. If you pull new commits or edit files, re-run `docker compose up -d --build` to pick them up.
+*   By default the port binds to all interfaces (`5173:5173`); change to `127.0.0.1:5173:5173` in `docker-compose.yml` if you want it reachable only from the host machine itself.
+*   Your backup folder is mounted **read-only** at `/backup` inside the container.
 *   If `WA_BACKUP_HOST_DIR` is left unset, the container still starts (using a harmless empty placeholder folder) — the app will just show no linked backup files until you set it.
 
 ## License

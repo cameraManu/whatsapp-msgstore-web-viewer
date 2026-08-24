@@ -13,10 +13,6 @@ services:
       # mapping instead (left side of the ":" below).
       - WA_BACKUP_DIR=/backup
     volumes:
-      # Live-reload source mount. Comment out for a static "just run it" setup.
-      - .:/app
-      - /app/node_modules
-
       # --- Point this at your real WhatsApp backup folder on the host ---
       # Set WA_BACKUP_HOST_DIR in .env (see .env.example). If unset, this
       # mounts an empty local folder so `docker compose up` still works.
