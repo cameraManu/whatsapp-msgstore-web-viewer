@@ -172,6 +172,41 @@ const MIME_TYPES: Record<string, string> = {
 // resolved from the DB's stored relative path against WA_MEDIA_DIR. Media
 // files in a WhatsApp backup are NOT encrypted (only msgstore.db is), so
 // these are served directly from disk.
+//
+// WhatsApp's message_media.file_path has been observed in a few different
+// forms across versions/exports:
+//   "WhatsApp Images/IMG-....jpg"                (relative to Media/)
+//   "Media/WhatsApp Images/IMG-....jpg"           (relative to WhatsApp/)
+//   "/storage/emulated/0/.../Media/WhatsApp Images/IMG-....jpg" (absolute device path)
+// Rather than assume one, try several candidate resolutions and use whichever
+// actually exists on disk.
+function resolveMediaCandidates(relPath: string): string[] {
+  if (!MEDIA_DIR) return [];
+  const candidates: string[] = [];
+
+  // 1. As-is, relative to MEDIA_DIR
+  candidates.push(path.resolve(MEDIA_DIR, relPath));
+
+  // 2. Strip a leading "Media/" segment (case-insensitive) if present, in
+  //    case the stored path already includes it and MEDIA_DIR also points at Media/
+  const normalized = relPath.replace(/\\/g, '/');
+  const stripped = normalized.replace(/^media\//i, '');
+  if (stripped !== normalized) {
+    candidates.push(path.resolve(MEDIA_DIR, stripped));
+  }
+
+  // 3. If it's an absolute-looking device path, take everything from the
+  //    last "Media/" segment onward and resolve that against MEDIA_DIR.
+  const mediaIdx = normalized.toLowerCase().lastIndexOf('/media/');
+  if (mediaIdx !== -1) {
+    const afterMedia = normalized.slice(mediaIdx + '/media/'.length);
+    candidates.push(path.resolve(MEDIA_DIR, afterMedia));
+  }
+
+  // De-duplicate while preserving order
+  return [...new Set(candidates)];
+}
+
 app.get('/api/media/:messageId', (req, res) => {
   if (!isDatabaseOpen()) {
     return res.status(503).json({ error: loadError || 'Database not loaded' });
@@ -186,12 +221,23 @@ app.get('/api/media/:messageId', (req, res) => {
     return res.status(404).json({ error: 'No media found for this message' });
   }
 
-  const target = path.resolve(MEDIA_DIR, relPath);
   const normalizedRoot = MEDIA_DIR.endsWith(path.sep) ? MEDIA_DIR : MEDIA_DIR + path.sep;
-  if (!target.startsWith(normalizedRoot)) {
-    return res.status(403).json({ error: 'Invalid media path' });
+  const candidates = resolveMediaCandidates(relPath);
+
+  let target: string | null = null;
+  for (const candidate of candidates) {
+    if (!candidate.startsWith(normalizedRoot)) continue; // reject path traversal
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+      target = candidate;
+      break;
+    }
   }
-  if (!fs.existsSync(target) || !fs.statSync(target).isFile()) {
+
+  if (!target) {
+    console.warn(
+      `[media] Not found for message ${messageId}. DB path: "${relPath}". Tried:\n` +
+        candidates.map((c) => `  - ${c}`).join('\n')
+    );
     // Common for offloaded/deleted media — the DB still references it but the
     // file itself was removed from the device to save space.
     return res.status(404).json({ error: 'Media file not found on disk (may have been offloaded)' });
