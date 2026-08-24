@@ -19,6 +19,7 @@ export interface Message {
   media_path: string | null;
   media_mime: string | null;
   media_caption: string | null;
+  sort_id: number;
 }
 
 export interface DbStats {

@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ConversationList } from './components/ConversationList';
 import { ChatWindow } from './components/ChatWindow';
-import { Conversation, Message } from './types';
+import { Conversation } from './types';
 import { Database, AlertCircle, Loader } from 'lucide-react';
 
 const PAGE_SIZE = 30;
-const MAX_MESSAGES = 5000;
 
 const App: React.FC = () => {
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -16,14 +15,11 @@ const App: React.FC = () => {
   const [totalConversations, setTotalConversations] = useState<number | null>(null);
   const [hasMoreConversations, setHasMoreConversations] = useState(false);
   const [loadingMoreConversations, setLoadingMoreConversations] = useState(false);
-  const loadingRef = useRef(false); // guards against duplicate concurrent page loads
+  const loadingRef = useRef(false);
 
   const [selectedChat, setSelectedChat] = useState<Conversation | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [loadingMessages, setLoadingMessages] = useState(false);
 
-  // Check server status on mount.
   useEffect(() => {
     (async () => {
       try {
@@ -43,7 +39,6 @@ const App: React.FC = () => {
     })();
   }, []);
 
-  /** Loads the next page of conversations (lazy loading — small pages, fetched as the user scrolls). */
   const loadMoreConversations = useCallback(async () => {
     if (loadingRef.current) return;
     loadingRef.current = true;
@@ -66,31 +61,12 @@ const App: React.FC = () => {
     }
   }, [conversations.length]);
 
-  // Kick off the first page once the server reports ready.
   useEffect(() => {
     if (status === 'ready') {
       loadMoreConversations();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
-
-  const handleChatSelect = async (chat: Conversation) => {
-    setSelectedChat(chat);
-    setLoadingMessages(true);
-    try {
-      const res = await fetch(`/api/conversations/${chat._id}/messages?limit=${MAX_MESSAGES}`);
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || `Server returned ${res.status}`);
-      }
-      const msgs: any[] = await res.json();
-      setMessages(msgs.map((m) => ({ ...m, timestamp: new Date(m.timestamp) })));
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoadingMessages(false);
-    }
-  };
 
   if (status === 'loading') {
     return (
@@ -135,16 +111,10 @@ const App: React.FC = () => {
     );
   }
 
-  // On mobile, the chat view replaces the list entirely (no split view) — so
-  // the global top bar only makes sense when no chat is open. Once a chat is
-  // selected, ChatWindow's own header takes over (with an inline back button),
-  // exactly like the native WhatsApp app's navigation stack. On desktop the
-  // top bar always stays visible alongside the split list/chat view.
   const showGlobalTopBar = !selectedChat;
 
   return (
     <div className="flex flex-col overflow-hidden bg-[#111b21]" style={{ height: '100dvh' }}>
-      {/* Top Bar — hidden on mobile once a chat is open; always visible on desktop */}
       <div
         className={`bg-[#202c33] px-4 py-2 items-center justify-between shadow-sm z-20 flex-shrink-0 ${
           showGlobalTopBar ? 'flex' : 'hidden md:flex'
@@ -168,7 +138,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Main Content Area */}
       <div className="flex flex-1 overflow-hidden relative">
         <div
           className={`${
@@ -178,19 +147,14 @@ const App: React.FC = () => {
           <ConversationList
             conversations={conversations}
             selectedId={selectedChat?._id || null}
-            onSelect={handleChatSelect}
+            onSelect={setSelectedChat}
             hasMore={hasMoreConversations}
             loadingMore={loadingMoreConversations}
             onLoadMore={loadMoreConversations}
           />
         </div>
         <div className={`${!selectedChat ? 'hidden md:flex' : 'flex'} flex-1 h-full min-w-0 relative`}>
-          <ChatWindow
-            conversation={selectedChat}
-            messages={messages}
-            loading={loadingMessages}
-            onBack={() => setSelectedChat(null)}
-          />
+          <ChatWindow conversation={selectedChat} onBack={() => setSelectedChat(null)} />
         </div>
       </div>
     </div>

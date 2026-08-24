@@ -3,7 +3,17 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { detectEncryptionType, decryptDatabase, parseKeyInput } from './decrypt.js';
-import { openDatabase, getConversations, getConversationsCount, searchConversations, getMessages, getMediaPathForMessage, isDatabaseOpen } from './db.js';
+import {
+  openDatabase,
+  getConversations,
+  getConversationsCount,
+  searchConversations,
+  getMessages,
+  searchMessagesInChat,
+  getChatMedia,
+  getMediaPathForMessage,
+  isDatabaseOpen,
+} from './db.js';
 import { findBackupFile } from './findBackup.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -128,8 +138,40 @@ app.get('/api/conversations/:id/messages', (req, res) => {
   }
   try {
     const chatId = Number(req.params.id);
-    const limit = req.query.limit ? Number(req.query.limit) : 5000;
-    res.json(getMessages(chatId, limit));
+    const limit = req.query.limit ? Number(req.query.limit) : 50;
+    const before = req.query.before ? Number(req.query.before) : undefined;
+    const items = getMessages(chatId, limit, before);
+    // hasMore is a cheap heuristic: if we got a full page, assume there may be more.
+    res.json({ items, hasMore: items.length === limit });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/conversations/:id/messages/search', (req, res) => {
+  if (!isDatabaseOpen()) {
+    return res.status(503).json({ error: loadError || 'Database not loaded' });
+  }
+  try {
+    const chatId = Number(req.params.id);
+    const q = String(req.query.q || '');
+    const from = req.query.from ? Number(req.query.from) : undefined;
+    const to = req.query.to ? Number(req.query.to) : undefined;
+    const items = searchMessagesInChat(chatId, q, from, to, 200);
+    res.json({ items });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/conversations/:id/media', (req, res) => {
+  if (!isDatabaseOpen()) {
+    return res.status(503).json({ error: loadError || 'Database not loaded' });
+  }
+  try {
+    const chatId = Number(req.params.id);
+    const items = getChatMedia(chatId, 500);
+    res.json({ items });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -218,6 +260,10 @@ app.get('/api/media/:messageId', (req, res) => {
   }
 
   if (!target) {
+    console.warn(
+      `[media] Not found for message ${messageId}. DB path: "${relPath}". MEDIA_DIR: "${MEDIA_DIR}". Tried:\n` +
+        candidates.map((c) => `  - ${c}`).join('\n')
+    );
     // Common for offloaded/deleted media (e.g. View Once) — the DB still
     // references it but the file itself was removed to save space.
     return res.status(404).json({ error: 'Media file not found on disk (may have been offloaded)' });
