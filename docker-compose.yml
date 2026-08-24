@@ -8,13 +8,22 @@ services:
     ports:
       - "5173:5173"
     environment:
-      # Path INSIDE the container where your backup folder is mounted below.
+      # Path INSIDE the container where your WhatsApp folder is mounted below.
+      # The server scans it for a .db/.crypt12/14/15 file, and automatically
+      # looks for a "Media" subfolder inside it to resolve photos/videos/etc.
       - WA_BACKUP_DIR=/backup
+      # Only needed if your media lives somewhere other than <WA_BACKUP_DIR>/Media
+      # (see WA_MEDIA_HOST_DIR below — leave both blank to use auto-detection).
+      - WA_MEDIA_DIR=${WA_MEDIA_HOST_DIR:+/media}
       # Your 64-character hex WhatsApp E2E backup recovery key. Required only
-      # if the file found in /backup is encrypted (.crypt12/14/15).
+      # if the file found is encrypted (.crypt12/14/15).
       - WA_BACKUP_KEY_HEX=${WA_BACKUP_KEY_HEX:-}
     volumes:
-      # --- Point this at your real WhatsApp backup folder on the host ---
+      # --- Point this at your WhatsApp parent folder on the host ---
+      # e.g. .../WhatsApp2/WhatsApp (containing Backups/, Media/, Databases/).
       # Set WA_BACKUP_HOST_DIR in .env (see .env.example). If unset, this
       # mounts an empty local folder so `docker compose up` still works.
       - ${WA_BACKUP_HOST_DIR:-./.docker-empty-backup}:/backup:ro
+      # Optional separate media mount — only used if WA_MEDIA_HOST_DIR is set
+      # in .env. Leave unset to auto-detect Media/ inside the backup folder above.
+      - ${WA_MEDIA_HOST_DIR:-./.docker-empty-media}:/media:ro

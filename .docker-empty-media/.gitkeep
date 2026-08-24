@@ -1,0 +1,3 @@
+This folder exists only so `docker compose up` has a valid default bind-mount
+target when WA_MEDIA_HOST_DIR isn't set in .env. It's intentionally empty
+and git-ignored (aside from this file).

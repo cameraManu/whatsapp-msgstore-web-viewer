@@ -1,13 +1,74 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Message } from '../types';
-import { Check, Image as ImageIcon } from 'lucide-react';
+import { Check, Image as ImageIcon, FileText, AlertTriangle } from 'lucide-react';
 
 interface MessageBubbleProps {
   message: Message;
 }
 
+const isImage = (mime: string | null, path: string | null) =>
+  (mime && mime.startsWith('image/')) || (path && /\.(jpe?g|png|gif|webp)$/i.test(path));
+const isVideo = (mime: string | null, path: string | null) =>
+  (mime && mime.startsWith('video/')) || (path && /\.(mp4|3gp|mov)$/i.test(path));
+const isAudio = (mime: string | null, path: string | null) =>
+  (mime && mime.startsWith('audio/')) || (path && /\.(opus|ogg|m4a|mp3|amr)$/i.test(path));
+
+const MediaContent: React.FC<{ message: Message }> = ({ message }) => {
+  const [failed, setFailed] = useState(false);
+  const src = `/api/media/${message._id}`;
+
+  if (failed) {
+    return (
+      <div className="flex items-center text-gray-400 italic py-1 text-xs">
+        <AlertTriangle size={14} className="mr-1.5 flex-shrink-0" />
+        <span>Media unavailable (may have been offloaded)</span>
+      </div>
+    );
+  }
+
+  if (isImage(message.media_mime, message.media_path)) {
+    return (
+      <img
+        src={src}
+        alt={message.media_caption || 'Image'}
+        className="rounded-md max-w-full max-h-80 object-contain mb-1"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+
+  if (isVideo(message.media_mime, message.media_path)) {
+    return (
+      <video
+        src={src}
+        controls
+        className="rounded-md max-w-full max-h-80 mb-1"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+
+  if (isAudio(message.media_mime, message.media_path)) {
+    return <audio src={src} controls className="w-full mb-1" onError={() => setFailed(true)} />;
+  }
+
+  // Generic document / unknown type — offer it as a download link.
+  return (
+    <a
+      href={src}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex items-center text-gray-700 hover:underline py-1"
+    >
+      <FileText size={16} className="mr-2 flex-shrink-0" />
+      <span className="truncate">{message.media_path?.split('/').pop() || 'Document'}</span>
+    </a>
+  );
+};
+
 export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
   const isSent = message.from_me;
+  const hasRealMedia = !!message.media_path;
 
   const formatTime = (date: Date) => {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -43,11 +104,16 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
           </div>
         )}
 
+        {/* Media */}
+        {hasRealMedia && <MediaContent message={message} />}
+
         {/* Content */}
         <div className="text-gray-900 px-1 leading-relaxed whitespace-pre-wrap break-words min-w-0 w-full" style={{ wordBreak: 'break-word' }}>
           {message.text_data ? (
             message.text_data
-          ) : (
+          ) : message.media_caption ? (
+            message.media_caption
+          ) : hasRealMedia ? null : (
             <div className="flex items-center text-gray-500 italic py-1">
               <ImageIcon size={16} className="mr-2" />
               <span>Media omitted</span>

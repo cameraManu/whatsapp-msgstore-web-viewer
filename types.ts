@@ -14,6 +14,9 @@ export interface Message {
   quoted_text: string | null;
   has_media: boolean;
   media_type?: string;
+  media_path: string | null;
+  media_mime: string | null;
+  media_caption: string | null;
 }
 
 export interface DbStats {
