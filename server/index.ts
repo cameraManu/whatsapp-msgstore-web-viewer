@@ -234,12 +234,8 @@ app.get('/api/media/:messageId', (req, res) => {
   }
 
   if (!target) {
-    console.warn(
-      `[media] Not found for message ${messageId}. DB path: "${relPath}". Tried:\n` +
-        candidates.map((c) => `  - ${c}`).join('\n')
-    );
-    // Common for offloaded/deleted media — the DB still references it but the
-    // file itself was removed from the device to save space.
+    // Common for offloaded/deleted media (e.g. View Once) — the DB still
+    // references it but the file itself was removed to save space.
     return res.status(404).json({ error: 'Media file not found on disk (may have been offloaded)' });
   }
 

@@ -154,6 +154,10 @@ export const decryptDatabase = (fileBuffer: Buffer, type: EncryptionType, rootKe
 
     const derivedKey = deriveCrypt15Key(rootKey);
 
+    console.log(
+      `[decrypt] crypt15 debug: fileSize=${fileBuffer.length} protobufSize=${protobufSize} flagByte=0x${flagByte.toString(16)} protobufStart=${protobufStart} protobufEnd=${protobufEnd} ivFound=${!!foundIv} iv=${iv.toString('hex')} ciphertextLen=${ciphertext.length} tagStart=${tagStart} authTag=${authTag.toString('hex')}`
+    );
+
     const decipher = crypto.createDecipheriv('aes-256-gcm', derivedKey, iv);
     decipher.setAuthTag(authTag);
     const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
