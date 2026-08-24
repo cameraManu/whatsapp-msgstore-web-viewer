@@ -48,22 +48,36 @@ export const loadContacts = (buffer: Buffer): number => {
   try {
     contactsDb = new Database(buffer, { readonly: true });
 
-    const tables = contactsDb
-      .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='wa_contacts'`)
+    const allTables = contactsDb
+      .prepare(`SELECT name FROM sqlite_master WHERE type='table'`)
       .all() as { name: string }[];
-    if (tables.length === 0) return 0;
+    console.log(`[contacts] Tables in wa.db: ${allTables.map((t) => t.name).join(', ')}`);
+
+    const tables = allTables.filter((t) => t.name === 'wa_contacts');
+    if (tables.length === 0) {
+      console.log('[contacts] No "wa_contacts" table found.');
+      return 0;
+    }
 
     const cols = contactsDb.prepare(`PRAGMA table_info(wa_contacts)`).all() as { name: string }[];
     const colNames = cols.map((c) => c.name);
+    console.log(`[contacts] wa_contacts columns: ${colNames.join(', ')}`);
 
-    const nameCol = ['display_name', 'given_name', 'wa_name'].find((c) => colNames.includes(c));
-    const jidCol = ['jid', 'raw_contact_id'].find((c) => colNames.includes(c));
-    if (!nameCol || !jidCol) return 0;
+    const nameCol = ['display_name', 'given_name', 'wa_name', 'name'].find((c) => colNames.includes(c));
+    const jidCol = ['jid', 'raw_contact_id', 'number'].find((c) => colNames.includes(c));
+
+    if (!nameCol || !jidCol) {
+      console.log(
+        `[contacts] Could not find expected columns (name: ${nameCol || 'none'}, jid: ${jidCol || 'none'}) — check the column list above.`
+      );
+      return 0;
+    }
 
     const rows = contactsDb.prepare(`SELECT ${jidCol} AS jid, ${nameCol} AS name FROM wa_contacts`).all() as {
       jid: string;
       name: string | null;
     }[];
+    console.log(`[contacts] Read ${rows.length} row(s) from wa_contacts. Sample: ${JSON.stringify(rows.slice(0, 3))}`);
 
     for (const row of rows) {
       if (!row.name || !row.jid) continue;
@@ -73,7 +87,8 @@ export const loadContacts = (buffer: Buffer): number => {
     }
 
     return contactsByPhone.size;
-  } catch {
+  } catch (err: any) {
+    console.log(`[contacts] Error reading wa_contacts: ${err.message}`);
     contactsByPhone = new Map();
     return 0;
   } finally {

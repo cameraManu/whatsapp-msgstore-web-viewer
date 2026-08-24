@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Message } from '../types';
-import { Check, Image as ImageIcon, FileText, AlertTriangle } from 'lucide-react';
+import { Check, Image as ImageIcon, FileText, AlertTriangle, X } from 'lucide-react';
 
 interface MessageBubbleProps {
   message: Message;
@@ -13,8 +13,31 @@ const isVideo = (mime: string | null, path: string | null) =>
 const isAudio = (mime: string | null, path: string | null) =>
   (mime && mime.startsWith('audio/')) || (path && /\.(opus|ogg|m4a|mp3|amr)$/i.test(path));
 
+/** Fullscreen lightbox for viewing an image at full size. */
+const ImageLightbox: React.FC<{ src: string; alt: string; onClose: () => void }> = ({ src, alt, onClose }) => (
+  <div
+    className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4"
+    onClick={onClose}
+  >
+    <button
+      onClick={onClose}
+      className="absolute top-4 right-4 text-white/80 hover:text-white p-2"
+      aria-label="Close"
+    >
+      <X size={28} />
+    </button>
+    <img
+      src={src}
+      alt={alt}
+      className="max-w-full max-h-full object-contain"
+      onClick={(e) => e.stopPropagation()}
+    />
+  </div>
+);
+
 const MediaContent: React.FC<{ message: Message }> = ({ message }) => {
   const [failed, setFailed] = useState(false);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
   const src = `/api/media/${message._id}`;
 
   if (failed) {
@@ -28,12 +51,22 @@ const MediaContent: React.FC<{ message: Message }> = ({ message }) => {
 
   if (isImage(message.media_mime, message.media_path)) {
     return (
-      <img
-        src={src}
-        alt={message.media_caption || 'Image'}
-        className="rounded-md max-w-full max-h-80 object-contain mb-1"
-        onError={() => setFailed(true)}
-      />
+      <>
+        <img
+          src={src}
+          alt={message.media_caption || 'Image'}
+          className="rounded-md max-w-full max-h-80 object-contain mb-1 cursor-pointer hover:opacity-90 transition-opacity"
+          onError={() => setFailed(true)}
+          onClick={() => setLightboxOpen(true)}
+        />
+        {lightboxOpen && (
+          <ImageLightbox
+            src={src}
+            alt={message.media_caption || 'Image'}
+            onClose={() => setLightboxOpen(false)}
+          />
+        )}
+      </>
     );
   }
 
@@ -42,6 +75,7 @@ const MediaContent: React.FC<{ message: Message }> = ({ message }) => {
       <video
         src={src}
         controls
+        preload="metadata"
         className="rounded-md max-w-full max-h-80 mb-1"
         onError={() => setFailed(true)}
       />
@@ -49,7 +83,7 @@ const MediaContent: React.FC<{ message: Message }> = ({ message }) => {
   }
 
   if (isAudio(message.media_mime, message.media_path)) {
-    return <audio src={src} controls className="w-full mb-1" onError={() => setFailed(true)} />;
+    return <audio src={src} controls preload="metadata" className="w-full mb-1" onError={() => setFailed(true)} />;
   }
 
   // Generic document / unknown type — offer it as a download link.

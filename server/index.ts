@@ -244,9 +244,36 @@ app.get('/api/media/:messageId', (req, res) => {
   }
 
   const ext = path.extname(target).toLowerCase();
-  res.setHeader('Content-Type', MIME_TYPES[ext] || 'application/octet-stream');
+  const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+  const stat = fs.statSync(target);
+  const fileSize = stat.size;
+  const range = req.headers.range;
+
   res.setHeader('Cache-Control', 'private, max-age=86400');
-  fs.createReadStream(target).pipe(res);
+  res.setHeader('Accept-Ranges', 'bytes');
+
+  if (range) {
+    // Supports byte-range requests, which browsers use for <video>/<audio>
+    // seeking. Without this, the seekbar can't jump to arbitrary positions.
+    const match = /bytes=(\d*)-(\d*)/.exec(range);
+    const start = match && match[1] ? parseInt(match[1], 10) : 0;
+    const end = match && match[2] ? parseInt(match[2], 10) : fileSize - 1;
+
+    if (start >= fileSize || end >= fileSize || start > end) {
+      res.status(416).setHeader('Content-Range', `bytes */${fileSize}`).end();
+      return;
+    }
+
+    res.status(206);
+    res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
+    res.setHeader('Content-Length', end - start + 1);
+    res.setHeader('Content-Type', contentType);
+    fs.createReadStream(target, { start, end }).pipe(res);
+  } else {
+    res.setHeader('Content-Length', fileSize);
+    res.setHeader('Content-Type', contentType);
+    fs.createReadStream(target).pipe(res);
+  }
 });
 
 // Serve the built frontend (vite build output)
