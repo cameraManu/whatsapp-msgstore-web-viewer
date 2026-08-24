@@ -148,21 +148,42 @@ export const decryptDatabase = (fileBuffer: Buffer, type: EncryptionType, rootKe
     const foundIv = extractCrypt15Iv(protobuf);
     const iv = foundIv || fileBuffer.subarray(8, 24);
 
-    const tagStart = fileBuffer.length - 32;
-    const ciphertext = fileBuffer.subarray(protobufEnd, tagStart);
-    const authTag = fileBuffer.subarray(tagStart, fileBuffer.length - 16);
-
     const derivedKey = deriveCrypt15Key(rootKey);
 
-    console.log(
-      `[decrypt] crypt15 debug: fileSize=${fileBuffer.length} protobufSize=${protobufSize} flagByte=0x${flagByte.toString(16)} protobufStart=${protobufStart} protobufEnd=${protobufEnd} ivFound=${!!foundIv} iv=${iv.toString('hex')} ciphertextLen=${ciphertext.length} tagStart=${tagStart} authTag=${authTag.toString('hex')}`
-    );
+    // The trailing structure of a .crypt15 file has been observed to differ
+    // slightly between backup types (e.g. large msgstore.db vs small wa.db) —
+    // rather than assume one fixed layout, try a few plausible tag/ciphertext
+    // boundary combinations and use whichever one produces a valid,
+    // authenticated (GCM auth tag verifies) decryption.
+    const candidates: { tagStart: number; tagEnd: number }[] = [
+      // Confirmed working layout for msgstore.db.crypt15: 32 trailing bytes,
+      // tag is the FIRST 16 of those (16 bytes after it are unused/reserved).
+      { tagStart: fileBuffer.length - 32, tagEnd: fileBuffer.length - 16 },
+      // Alternate layout seen on smaller .crypt15 files (e.g. wa.db): tag is
+      // simply the last 16 bytes of the file.
+      { tagStart: fileBuffer.length - 16, tagEnd: fileBuffer.length },
+      // Whole last 32 bytes as the tag (uncommon, but cheap to try)
+      { tagStart: fileBuffer.length - 32, tagEnd: fileBuffer.length },
+    ];
 
-    const decipher = crypto.createDecipheriv('aes-256-gcm', derivedKey, iv);
-    decipher.setAuthTag(authTag);
-    const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    let lastError: Error | null = null;
+    for (const { tagStart, tagEnd } of candidates) {
+      if (tagStart <= protobufEnd) continue;
+      try {
+        const ciphertext = fileBuffer.subarray(protobufEnd, tagStart);
+        const authTag = fileBuffer.subarray(tagStart, tagEnd);
+        if (authTag.length !== 16) continue; // GCM tag must be exactly 16 bytes
 
-    return zlib.inflateSync(decrypted);
+        const decipher = crypto.createDecipheriv('aes-256-gcm', derivedKey, iv);
+        decipher.setAuthTag(authTag);
+        const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+        return zlib.inflateSync(decrypted);
+      } catch (err: any) {
+        lastError = err;
+      }
+    }
+
+    throw lastError || new Error('Could not determine crypt15 ciphertext/tag boundaries');
   }
 
   // crypt12 / crypt14
