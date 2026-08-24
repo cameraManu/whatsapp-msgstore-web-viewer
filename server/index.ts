@@ -3,8 +3,8 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { detectEncryptionType, decryptDatabase, parseKeyInput } from './decrypt.js';
-import { openDatabase, loadContacts, getConversations, getMessages, getMediaPathForMessage, isDatabaseOpen } from './db.js';
-import { findBackupFile, findContactsFile } from './findBackup.js';
+import { openDatabase, getConversations, getConversationsCount, searchConversations, getMessages, getMediaPathForMessage, isDatabaseOpen } from './db.js';
+import { findBackupFile } from './findBackup.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -75,41 +75,6 @@ function loadBackupAtStartup() {
 
 loadBackupAtStartup();
 
-/** Best-effort: decrypts and loads wa.db (contacts) for name resolution. Never blocks startup on failure. */
-function loadContactsAtStartup() {
-  if (!BACKUP_DIR) return;
-
-  const found = findContactsFile(BACKUP_DIR);
-  if (!found) {
-    console.log('[startup] No wa.db found — conversations will show phone numbers instead of contact names.');
-    return;
-  }
-
-  try {
-    const fileBuffer = fs.readFileSync(found.path);
-    const encType = detectEncryptionType(found.name);
-    let dbBuffer: Buffer;
-
-    if (encType) {
-      if (!KEY_HEX) {
-        console.log(`[startup] ${found.name} is encrypted but WA_BACKUP_KEY_HEX is not set — skipping contact names.`);
-        return;
-      }
-      const rootKey = parseKeyInput(KEY_HEX);
-      dbBuffer = decryptDatabase(fileBuffer, encType, rootKey);
-    } else {
-      dbBuffer = fileBuffer;
-    }
-
-    const count = loadContacts(dbBuffer);
-    console.log(`[startup] Loaded ${count} contact name(s) from ${found.name}.`);
-  } catch (err: any) {
-    console.log(`[startup] Could not load contacts from ${found.name}: ${err.message} — continuing without contact names.`);
-  }
-}
-
-loadContactsAtStartup();
-
 if (MEDIA_DIR) {
   console.log(`[startup] Media folder: ${MEDIA_DIR}`);
 } else {
@@ -131,8 +96,27 @@ app.get('/api/conversations', (req, res) => {
     return res.status(503).json({ error: loadError || 'Database not loaded' });
   }
   try {
-    const limit = req.query.limit ? Number(req.query.limit) : 1000;
-    res.json(getConversations(limit));
+    const limit = req.query.limit ? Number(req.query.limit) : 30;
+    const offset = req.query.offset ? Number(req.query.offset) : 0;
+    const items = getConversations(limit, offset);
+    const total = getConversationsCount();
+    res.json({ items, total, hasMore: offset + items.length < total });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/conversations/search', (req, res) => {
+  if (!isDatabaseOpen()) {
+    return res.status(503).json({ error: loadError || 'Database not loaded' });
+  }
+  try {
+    const q = String(req.query.q || '').trim();
+    if (!q) {
+      return res.json({ items: [] });
+    }
+    const items = searchConversations(q, 50);
+    res.json({ items });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

@@ -1,8 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ConversationList } from './components/ConversationList';
 import { ChatWindow } from './components/ChatWindow';
 import { Conversation, Message } from './types';
 import { Database, AlertCircle, Loader } from 'lucide-react';
+
+const PAGE_SIZE = 30;
+const MAX_MESSAGES = 5000;
 
 const App: React.FC = () => {
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -10,15 +13,17 @@ const App: React.FC = () => {
   const [fileName, setFileName] = useState<string | null>(null);
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [totalConversations, setTotalConversations] = useState<number | null>(null);
+  const [hasMoreConversations, setHasMoreConversations] = useState(false);
+  const [loadingMoreConversations, setLoadingMoreConversations] = useState(false);
+  const loadingRef = useRef(false); // guards against duplicate concurrent page loads
+
   const [selectedChat, setSelectedChat] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loadingMessages, setLoadingMessages] = useState(false);
 
-  const [maxChats, setMaxChats] = useState(1000);
-  const [maxMessages, setMaxMessages] = useState(5000);
-
-  // Check server status, then load conversations once ready.
+  // Check server status on mount.
   useEffect(() => {
     (async () => {
       try {
@@ -31,32 +36,49 @@ const App: React.FC = () => {
           return;
         }
         setStatus('ready');
-      } catch (err: any) {
+      } catch {
         setStatus('error');
         setStatusError('Could not reach the server. Is it running?');
       }
     })();
   }, []);
 
-  const loadChats = async (limit: number) => {
+  /** Loads the next page of conversations (lazy loading — small pages, fetched as the user scrolls). */
+  const loadMoreConversations = useCallback(async () => {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
+    setLoadingMoreConversations(true);
     try {
-      const res = await fetch(`/api/conversations?limit=${limit}`);
+      const res = await fetch(`/api/conversations?limit=${PAGE_SIZE}&offset=${conversations.length}`);
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || `Server returned ${res.status}`);
       }
-      const chats = await res.json();
-      setConversations(chats);
+      const data = await res.json();
+      setConversations((prev) => [...prev, ...data.items]);
+      setTotalConversations(data.total);
+      setHasMoreConversations(data.hasMore);
     } catch (err: any) {
       setError(err.message);
+    } finally {
+      setLoadingMoreConversations(false);
+      loadingRef.current = false;
     }
-  };
+  }, [conversations.length]);
+
+  // Kick off the first page once the server reports ready.
+  useEffect(() => {
+    if (status === 'ready') {
+      loadMoreConversations();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status]);
 
   const handleChatSelect = async (chat: Conversation) => {
     setSelectedChat(chat);
     setLoadingMessages(true);
     try {
-      const res = await fetch(`/api/conversations/${chat._id}/messages?limit=${maxMessages}`);
+      const res = await fetch(`/api/conversations/${chat._id}/messages?limit=${MAX_MESSAGES}`);
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || `Server returned ${res.status}`);
@@ -70,28 +92,12 @@ const App: React.FC = () => {
     }
   };
 
-  // Load chats once the server reports ready, and whenever maxChats changes.
-  useEffect(() => {
-    if (status === 'ready') {
-      loadChats(maxChats);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, maxChats]);
-
-  // Reload messages if the max-messages setting changes and a chat is selected.
-  useEffect(() => {
-    if (status === 'ready' && selectedChat) {
-      handleChatSelect(selectedChat);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [maxMessages]);
-
   if (status === 'loading') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-green-500 to-teal-600 flex items-center justify-center p-4">
-        <div className="bg-white rounded-xl shadow-2xl p-8 max-w-lg w-full text-center">
-          <Loader className="animate-spin text-green-600 mx-auto mb-4" size={40} />
-          <p className="text-gray-600 font-medium">Connecting to server...</p>
+      <div className="bg-[#111b21] flex items-center justify-center p-4" style={{ minHeight: '100dvh' }}>
+        <div className="bg-[#202c33] rounded-xl shadow-2xl p-8 max-w-lg w-full text-center">
+          <Loader className="animate-spin text-[#00a884] mx-auto mb-4" size={40} />
+          <p className="text-[#e9edef] font-medium">Connecting to server...</p>
         </div>
       </div>
     );
@@ -99,29 +105,29 @@ const App: React.FC = () => {
 
   if (status === 'error') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-green-500 to-teal-600 flex items-center justify-center p-4">
-        <div className="bg-white rounded-xl shadow-2xl p-8 max-w-lg w-full text-center">
-          <div className="bg-red-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 text-red-600">
+      <div className="bg-[#111b21] flex items-center justify-center p-4" style={{ minHeight: '100dvh' }}>
+        <div className="bg-[#202c33] rounded-xl shadow-2xl p-8 max-w-lg w-full text-center">
+          <div className="bg-red-500/10 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 text-red-400">
             <AlertCircle size={40} />
           </div>
-          <h1 className="text-2xl font-bold text-gray-800 mb-2">Backup Not Loaded</h1>
-          <p className="text-gray-500 mb-6">
+          <h1 className="text-2xl font-bold text-[#e9edef] mb-2">Backup Not Loaded</h1>
+          <p className="text-[#8696a0] mb-6">
             The server couldn't load your WhatsApp backup. This is configured entirely via environment
             variables — there's nothing to upload here.
           </p>
-          <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-4 text-left text-sm mb-6">
+          <div className="bg-red-500/10 border border-red-500/30 text-red-300 rounded-lg p-4 text-left text-sm mb-6">
             {statusError}
           </div>
-          <div className="text-left text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-1">
-            <p className="font-medium text-gray-600 mb-2">Check on the server:</p>
+          <div className="text-left text-xs text-[#8696a0] bg-[#182229] border border-[#2a3942] rounded-lg p-4 space-y-1">
+            <p className="font-medium text-[#aebac1] mb-2">Check on the server:</p>
             <p>
-              <code className="bg-gray-200 px-1 rounded">WA_BACKUP_DIR</code> points to a folder containing your{' '}
-              <code className="bg-gray-200 px-1 rounded">msgstore.db</code> /{' '}
-              <code className="bg-gray-200 px-1 rounded">.crypt12/14/15</code> file
+              <code className="bg-[#2a3942] px-1 rounded text-[#d1d7db]">WA_BACKUP_DIR</code> points to a folder
+              containing your <code className="bg-[#2a3942] px-1 rounded text-[#d1d7db]">msgstore.db</code> /{' '}
+              <code className="bg-[#2a3942] px-1 rounded text-[#d1d7db]">.crypt12/14/15</code> file
             </p>
             <p>
-              <code className="bg-gray-200 px-1 rounded">WA_BACKUP_KEY_HEX</code> is set to your 64-character hex
-              recovery key (only needed for encrypted backups)
+              <code className="bg-[#2a3942] px-1 rounded text-[#d1d7db]">WA_BACKUP_KEY_HEX</code> is set to your
+              64-character hex recovery key (only needed for encrypted backups)
             </p>
           </div>
         </div>
@@ -129,40 +135,34 @@ const App: React.FC = () => {
     );
   }
 
-  return (
-    <div className="flex flex-col h-screen overflow-hidden">
-      {/* Settings Bar */}
-      <div className="bg-white border-b border-gray-200 px-4 py-2 flex items-center justify-between shadow-sm z-20">
-        <div className="flex items-center space-x-2 text-green-700 font-semibold">
-          <Database size={18} />
-          <span>WA Viewer Pro</span>
-          {fileName && <span className="text-xs text-gray-400 font-normal">({fileName})</span>}
-        </div>
+  // On mobile, the chat view replaces the list entirely (no split view) — so
+  // the global top bar only makes sense when no chat is open. Once a chat is
+  // selected, ChatWindow's own header takes over (with an inline back button),
+  // exactly like the native WhatsApp app's navigation stack. On desktop the
+  // top bar always stays visible alongside the split list/chat view.
+  const showGlobalTopBar = !selectedChat;
 
-        <div className="flex items-center space-x-4 text-xs">
-          <div className="flex items-center space-x-2">
-            <label className="text-gray-500">Max Chats:</label>
-            <input
-              type="number"
-              value={maxChats}
-              onChange={(e) => setMaxChats(Number(e.target.value))}
-              className="w-16 border rounded px-2 py-1 bg-gray-50 focus:ring-1 focus:ring-green-500 outline-none"
-            />
-          </div>
-          <div className="flex items-center space-x-2">
-            <label className="text-gray-500">Max Msgs:</label>
-            <input
-              type="number"
-              value={maxMessages}
-              onChange={(e) => setMaxMessages(Number(e.target.value))}
-              className="w-16 border rounded px-2 py-1 bg-gray-50 focus:ring-1 focus:ring-green-500 outline-none"
-            />
-          </div>
+  return (
+    <div className="flex flex-col overflow-hidden bg-[#111b21]" style={{ height: '100dvh' }}>
+      {/* Top Bar — hidden on mobile once a chat is open; always visible on desktop */}
+      <div
+        className={`bg-[#202c33] px-4 py-2 items-center justify-between shadow-sm z-20 flex-shrink-0 ${
+          showGlobalTopBar ? 'flex' : 'hidden md:flex'
+        }`}
+        style={{ paddingTop: 'calc(env(safe-area-inset-top) + 8px)', minHeight: '49px' }}
+      >
+        <div className="flex items-center space-x-2 text-[#e9edef] font-medium">
+          <Database size={18} className="text-[#00a884]" />
+          <span>WA Viewer</span>
+          {fileName && <span className="text-xs text-[#8696a0] font-normal">({fileName})</span>}
         </div>
+        <span className="text-[11px] text-[#8696a0] bg-[#2a3942] px-2 py-1 rounded-full">
+          {totalConversations !== null ? `${conversations.length}/${totalConversations}` : conversations.length}
+        </span>
       </div>
 
       {error && (
-        <div className="bg-red-50 border-b border-red-200 text-red-700 px-4 py-2 text-sm flex items-center">
+        <div className="bg-red-500/10 border-b border-red-500/30 text-red-300 px-4 py-2 text-sm flex items-center flex-shrink-0">
           <AlertCircle size={16} className="mr-2 flex-shrink-0" />
           {error}
         </div>
@@ -170,24 +170,27 @@ const App: React.FC = () => {
 
       {/* Main Content Area */}
       <div className="flex flex-1 overflow-hidden relative">
-        <div className={`${selectedChat ? 'hidden md:flex' : 'flex'} w-full md:w-auto h-full flex-shrink-0 border-r border-gray-200 bg-white`}>
+        <div
+          className={`${
+            selectedChat ? 'hidden md:flex' : 'flex'
+          } w-full md:w-auto h-full flex-shrink-0 border-r border-[#222d34]`}
+        >
           <ConversationList
             conversations={conversations}
             selectedId={selectedChat?._id || null}
             onSelect={handleChatSelect}
+            hasMore={hasMoreConversations}
+            loadingMore={loadingMoreConversations}
+            onLoadMore={loadMoreConversations}
           />
         </div>
-        <div className={`${!selectedChat ? 'hidden md:flex' : 'flex'} flex-1 h-full min-w-0 bg-[#efeae2] relative`}>
-          <ChatWindow conversation={selectedChat} messages={messages} loading={loadingMessages} />
-          {/* Mobile Back Button Overlay */}
-          {selectedChat && (
-            <button
-              onClick={() => setSelectedChat(null)}
-              className="md:hidden absolute top-3 left-3 z-50 bg-white/80 p-2 rounded-full shadow-md text-gray-700 backdrop-blur-sm"
-            >
-              ← Back
-            </button>
-          )}
+        <div className={`${!selectedChat ? 'hidden md:flex' : 'flex'} flex-1 h-full min-w-0 relative`}>
+          <ChatWindow
+            conversation={selectedChat}
+            messages={messages}
+            loading={loadingMessages}
+            onBack={() => setSelectedChat(null)}
+          />
         </div>
       </div>
     </div>

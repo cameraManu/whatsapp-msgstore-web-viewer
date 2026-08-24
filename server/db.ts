@@ -5,6 +5,8 @@ export interface Conversation {
   jid: string;
   subject: string | null;
   timestamp: number;
+  lastMessagePreview: string | null;
+  unreadCount: number;
 }
 
 export interface Message {
@@ -23,11 +25,6 @@ let db: Database.Database | null = null;
 let mediaJoinAvailable = false;
 let mediaColumns: { pathCol: string; mimeCol: string | null; captionCol: string | null; linkCol: string } | null = null;
 
-// Contact name resolution (from wa.db) — a simple in-memory map keyed by
-// phone number (the "user" part of a JID, e.g. "40712345678"), since
-// wa_contacts is a small table and this avoids a query per conversation row.
-let contactsByPhone: Map<string, string> = new Map();
-
 /** Opens the decrypted SQLite database bytes read-only, in memory. */
 export const openDatabase = (buffer: Buffer): void => {
   if (db) db.close();
@@ -36,67 +33,6 @@ export const openDatabase = (buffer: Buffer): void => {
 };
 
 export const isDatabaseOpen = (): boolean => db !== null;
-
-/**
- * Opens the decrypted wa.db contacts database and loads display names into
- * memory. Safe to call with no contacts DB available — resolveContactName
- * just falls back to the raw phone number in that case.
- */
-export const loadContacts = (buffer: Buffer): number => {
-  contactsByPhone = new Map();
-  let contactsDb: Database.Database | null = null;
-  try {
-    contactsDb = new Database(buffer, { readonly: true });
-
-    const allTables = contactsDb
-      .prepare(`SELECT name FROM sqlite_master WHERE type='table'`)
-      .all() as { name: string }[];
-    console.log(`[contacts] Tables in wa.db: ${allTables.map((t) => t.name).join(', ')}`);
-
-    const tables = allTables.filter((t) => t.name === 'wa_contacts');
-    if (tables.length === 0) {
-      console.log('[contacts] No "wa_contacts" table found.');
-      return 0;
-    }
-
-    const cols = contactsDb.prepare(`PRAGMA table_info(wa_contacts)`).all() as { name: string }[];
-    const colNames = cols.map((c) => c.name);
-    console.log(`[contacts] wa_contacts columns: ${colNames.join(', ')}`);
-
-    const nameCol = ['display_name', 'given_name', 'wa_name', 'name'].find((c) => colNames.includes(c));
-    const jidCol = ['jid', 'raw_contact_id', 'number'].find((c) => colNames.includes(c));
-
-    if (!nameCol || !jidCol) {
-      console.log(
-        `[contacts] Could not find expected columns (name: ${nameCol || 'none'}, jid: ${jidCol || 'none'}) — check the column list above.`
-      );
-      return 0;
-    }
-
-    const rows = contactsDb.prepare(`SELECT ${jidCol} AS jid, ${nameCol} AS name FROM wa_contacts`).all() as {
-      jid: string;
-      name: string | null;
-    }[];
-    console.log(`[contacts] Read ${rows.length} row(s) from wa_contacts. Sample: ${JSON.stringify(rows.slice(0, 3))}`);
-
-    for (const row of rows) {
-      if (!row.name || !row.jid) continue;
-      // JIDs look like "40712345678@s.whatsapp.net" — extract just the number.
-      const phone = row.jid.split('@')[0];
-      if (phone) contactsByPhone.set(phone, row.name);
-    }
-
-    return contactsByPhone.size;
-  } catch (err: any) {
-    console.log(`[contacts] Error reading wa_contacts: ${err.message}`);
-    contactsByPhone = new Map();
-    return 0;
-  } finally {
-    contactsDb?.close();
-  }
-};
-
-const resolveContactName = (phone: string): string | null => contactsByPhone.get(phone) || null;
 
 /**
  * WhatsApp's message_media schema has varied slightly across versions.
@@ -133,8 +69,76 @@ function detectMediaSchema(): void {
   }
 }
 
-export const getConversations = (limit: number = 1000): Conversation[] => {
+/** Total number of conversations, used by the client to know when to stop paging. */
+export const getConversationsCount = (): number => {
   if (!db) throw new Error('Database not loaded');
+  const row = db.prepare(`SELECT COUNT(*) AS count FROM chat`).get() as { count: number };
+  return row.count;
+};
+
+/**
+ * Paginated conversation list, sorted by most recent activity first (matches
+ * WhatsApp Web's chat list ordering). Includes a short preview of the last
+ * message so the list can render like a real chat list without a second
+ * round-trip per row.
+ */
+export const getConversations = (limit: number = 30, offset: number = 0): Conversation[] => {
+  if (!db) throw new Error('Database not loaded');
+
+  const rows = db
+    .prepare(
+      `
+      SELECT
+        chat._id,
+        jid.user,
+        chat.subject,
+        chat.sort_timestamp,
+        (
+          SELECT text_data FROM message
+          WHERE message.chat_row_id = chat._id
+          ORDER BY message.sort_id DESC
+          LIMIT 1
+        ) AS last_text,
+        (
+          SELECT from_me FROM message
+          WHERE message.chat_row_id = chat._id
+          ORDER BY message.sort_id DESC
+          LIMIT 1
+        ) AS last_from_me
+      FROM chat
+      LEFT JOIN jid ON chat.jid_row_id = jid._id
+      ORDER BY chat.sort_timestamp DESC
+      LIMIT ? OFFSET ?
+    `
+    )
+    .all(limit, offset) as any[];
+
+  return rows.map((row) => {
+    const preview = row.last_text
+      ? (row.last_from_me === 1 ? 'You: ' : '') + row.last_text
+      : row.last_text === null && row.last_from_me !== null
+        ? '📷 Media'
+        : null;
+    return {
+      _id: row._id,
+      jid: row.user || 'Unknown',
+      subject: row.subject,
+      timestamp: row.sort_timestamp,
+      lastMessagePreview: preview,
+      unreadCount: 0, // not tracked in this read-only viewer
+    };
+  });
+};
+
+/**
+ * Client-side-style search across ALL conversations (not just the loaded
+ * page) — matches by group subject or phone number substring. Kept fast by
+ * only selecting the columns needed and relying on SQLite's index-free scan
+ * over what's typically a small `chat` table (hundreds to low thousands of rows).
+ */
+export const searchConversations = (query: string, limit: number = 50): Conversation[] => {
+  if (!db) throw new Error('Database not loaded');
+  const like = `%${query}%`;
 
   const rows = db
     .prepare(
@@ -146,24 +150,21 @@ export const getConversations = (limit: number = 1000): Conversation[] => {
         chat.sort_timestamp
       FROM chat
       LEFT JOIN jid ON chat.jid_row_id = jid._id
+      WHERE chat.subject LIKE ? OR jid.user LIKE ?
       ORDER BY chat.sort_timestamp DESC
       LIMIT ?
     `
     )
-    .all(limit) as any[];
+    .all(like, like, limit) as any[];
 
-  return rows.map((row) => {
-    const phone = row.user || 'Unknown';
-    // For group chats, chat.subject is already the group name — leave as-is.
-    // For 1:1 chats, prefer the resolved contact name over the raw number.
-    const resolvedSubject = row.subject || (phone !== 'Unknown' ? resolveContactName(phone) : null);
-    return {
-      _id: row._id,
-      jid: phone,
-      subject: resolvedSubject,
-      timestamp: row.sort_timestamp,
-    };
-  });
+  return rows.map((row) => ({
+    _id: row._id,
+    jid: row.user || 'Unknown',
+    subject: row.subject,
+    timestamp: row.sort_timestamp,
+    lastMessagePreview: null,
+    unreadCount: 0,
+  }));
 };
 
 /** Looks up the relative media file path for a single message, used by the /api/media endpoint. */

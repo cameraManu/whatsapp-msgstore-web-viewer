@@ -4,6 +4,8 @@ export interface Conversation {
   subject: string | null;
   timestamp: number;
   messageCount?: number;
+  lastMessagePreview: string | null;
+  unreadCount: number;
 }
 
 export interface Message {

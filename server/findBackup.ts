@@ -69,7 +69,3 @@ const findExactBaseName = (backupDir: string, exactBaseNames: string[]): FoundFi
 /** Finds the main WhatsApp message database (msgstore.db / .crypt12/14/15). */
 export const findBackupFile = (backupDir: string): FoundFile | null =>
   findExactBaseName(backupDir, ['msgstore.db', 'msgstore']);
-
-/** Finds the WhatsApp contacts database (wa.db / .crypt12/14/15), used to resolve display names. */
-export const findContactsFile = (backupDir: string): FoundFile | null =>
-  findExactBaseName(backupDir, ['wa.db', 'wa']);
