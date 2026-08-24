@@ -1,233 +1,131 @@
 import React, { useState, useEffect } from 'react';
-import { initDatabase, getConversations, getMessages } from './services/dbService';
 import { ConversationList } from './components/ConversationList';
 import { ChatWindow } from './components/ChatWindow';
 import { Conversation, Message } from './types';
-import { Database, Upload, AlertCircle, Download, Key, Loader } from 'lucide-react';
-import { detectEncryptionType, extractKey, decryptDatabase, EncryptionType } from './services/encryptionService';
-import { KeyEntryModal } from './components/KeyEntryModal';
-import { BackupFolderPanel } from './components/BackupFolderPanel';
+import { Database, AlertCircle, Loader } from 'lucide-react';
 
 const App: React.FC = () => {
-  const [dbLoaded, setDbLoaded] = useState(false);
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const [fileName, setFileName] = useState<string | null>(null);
+
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedChat, setSelectedChat] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loadingMessages, setLoadingMessages] = useState(false);
 
-  // Encryption Support
-  const [pendingFile, setPendingFile] = useState<File | null>(null);
-  const [encryptionType, setEncryptionType] = useState<EncryptionType | null>(null);
-  const [showKeyModal, setShowKeyModal] = useState(false);
-  const [isDecrypting, setIsDecrypting] = useState(false);
-  const [progressStatus, setProgressStatus] = useState("Decrypting...");
-
-  // Settings
   const [maxChats, setMaxChats] = useState(1000);
   const [maxMessages, setMaxMessages] = useState(5000);
 
-
-
-  const processFile = async (file: File) => {
-    setError(null);
-    setPendingFile(null);
-    setEncryptionType(null);
-    setShowKeyModal(false);
-
-    try {
-      const buffer = await file.arrayBuffer();
-
-      // Check for encryption
-      const detectedType = detectEncryptionType(buffer, file.name);
-      if (detectedType) {
-        // console.log("Detected encryption:", detectedType);
-        setPendingFile(file);
-        setEncryptionType(detectedType);
-        setShowKeyModal(true);
-        return;
+  // Check server status, then load conversations once ready.
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+        setFileName(data.fileName || null);
+        if (!data.ready) {
+          setStatus('error');
+          setStatusError(data.error || 'Database is not ready on the server.');
+          return;
+        }
+        setStatus('ready');
+      } catch (err: any) {
+        setStatus('error');
+        setStatusError('Could not reach the server. Is it running?');
       }
+    })();
+  }, []);
 
-      // If not encrypted, load directly
-      await initDatabase(buffer);
-      setDbLoaded(true);
-      loadChats(maxChats);
-    } catch (err: any) {
-      console.error(err);
-      setError("Failed to load database. Please ensure it is a valid msgstore.db file.");
-      setDbLoaded(false);
-    }
-  };
-
-  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    await processFile(file);
-  };
-
-
-
-  const handleKeySubmit = async (keyInput: File | string) => {
-    if (!pendingFile || !encryptionType) return;
-
-    setIsDecrypting(true);
-    setError(null);
-
+  const loadChats = async (limit: number) => {
     try {
-      // 1. Extract Key
-      let keyBuffer: ArrayBuffer;
-      if (typeof keyInput === 'string') {
-        // It's a hex string
-        keyBuffer = new TextEncoder().encode(keyInput).buffer;
-      } else {
-        keyBuffer = await keyInput.arrayBuffer();
+      const res = await fetch(`/api/conversations?limit=${limit}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `Server returned ${res.status}`);
       }
-
-      const { cryptoKey, raw } = await extractKey(keyBuffer);
-
-      // 2. Decrypt Database
-      const dbBuffer = await pendingFile.arrayBuffer();
-      const decryptedBuffer = await decryptDatabase(
-        dbBuffer,
-        cryptoKey,
-        encryptionType,
-        raw,
-        (status) => setProgressStatus(status)
-      );
-
-      // 3. Init Database
-      setProgressStatus("Initializing Database...");
-      // Small timeout to allow UI to render the status change before main thread blocks again for init
-      await new Promise(r => setTimeout(r, 10));
-
-      await initDatabase(decryptedBuffer);
-      setDbLoaded(true);
-      loadChats(maxChats);
-
-      // Reset Modal State
-      setShowKeyModal(false);
-      setPendingFile(null);
-    } catch (err: any) {
-      console.error("Decryption/Load Error:", err);
-      setError(err.message || "Decryption failed. Please check your key file.");
-    } finally {
-      setIsDecrypting(false);
-    }
-  };
-
-  const cancelKeyEntry = () => {
-    setShowKeyModal(false);
-    setPendingFile(null);
-    setEncryptionType(null);
-    // Reset file input? 
-  };
-
-  const loadChats = (limit: number) => {
-    try {
-      const chats = getConversations(limit);
+      const chats = await res.json();
       setConversations(chats);
     } catch (err: any) {
       setError(err.message);
     }
   };
 
-  const handleChatSelect = (chat: Conversation) => {
+  const handleChatSelect = async (chat: Conversation) => {
     setSelectedChat(chat);
     setLoadingMessages(true);
-    // Small timeout to allow UI to render loading state
-    setTimeout(() => {
-      const msgs = getMessages(chat._id, maxMessages);
-      setMessages(msgs);
+    try {
+      const res = await fetch(`/api/conversations/${chat._id}/messages?limit=${maxMessages}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `Server returned ${res.status}`);
+      }
+      const msgs: any[] = await res.json();
+      setMessages(msgs.map((m) => ({ ...m, timestamp: new Date(m.timestamp) })));
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
       setLoadingMessages(false);
-    }, 10);
+    }
   };
 
-  // Reload chats if settings change and DB is loaded
+  // Load chats once the server reports ready, and whenever maxChats changes.
   useEffect(() => {
-    if (dbLoaded) {
+    if (status === 'ready') {
       loadChats(maxChats);
     }
-  }, [maxChats, dbLoaded]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, maxChats]);
 
-  // Reload messages if settings change and chat is selected
+  // Reload messages if the max-messages setting changes and a chat is selected.
   useEffect(() => {
-    if (dbLoaded && selectedChat) {
+    if (status === 'ready' && selectedChat) {
       handleChatSelect(selectedChat);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [maxMessages]);
 
-  if (!dbLoaded) {
+  if (status === 'loading') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-green-500 to-teal-600 flex items-center justify-center p-4">
         <div className="bg-white rounded-xl shadow-2xl p-8 max-w-lg w-full text-center">
-          <div className="bg-green-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 text-green-600">
-            <Database size={40} />
-          </div>
-          <h1 className="text-2xl font-bold text-gray-800 mb-2">WhatsApp DB Viewer</h1>
-          <p className="text-gray-500 mb-8">
-            Open your <code>msgstore.db</code> file to view chats, messages, and history in a clean interface.
-            <br /><span className="text-xs text-gray-400 mt-2 block">(No data is uploaded. Everything is processed locally in your browser.)</span>
-          </p>
-
-          <label className="block w-full cursor-pointer group">
-            <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 hover:border-green-500 hover:bg-green-50 transition-all flex flex-col items-center">
-              <Upload size={32} className="text-gray-400 group-hover:text-green-500 mb-2" />
-              <span className="text-sm font-medium text-gray-600 group-hover:text-green-600">
-                Click to select msgstore.db
-              </span>
-            </div>
-            <input
-              type="file"
-              className="hidden"
-              accept=".db,application/vnd.sqlite3,.crypt12,.crypt14,.crypt15"
-              onChange={handleFileChange}
-            />
-          </label>
-
-          <div className="mt-6 pt-4 border-t border-gray-100">
-            <p className="text-sm text-gray-500 mb-2">Don't have a file?</p>
-            <a
-              href="https://github.com/trevordixon/whatsapp-msgstore-web-viewer/raw/refs/heads/main/msgstore.db"
-              className="inline-flex items-center text-sm text-green-600 hover:text-green-700 font-medium hover:underline"
-              download
-            >
-              <Download size={16} className="mr-1.5" />
-              Download sample msgstore.db
-            </a>
-          </div>
-
-          <BackupFolderPanel onFileSelected={processFile} />
-
-          {error && (
-            <div className="mt-6 p-4 bg-red-50 text-red-700 rounded-lg flex items-start text-left text-sm border border-red-200">
-              <AlertCircle size={20} className="mr-2 flex-shrink-0 mt-0.5" />
-              {error}
-            </div>
-          )}
+          <Loader className="animate-spin text-green-600 mx-auto mb-4" size={40} />
+          <p className="text-gray-600 font-medium">Connecting to server...</p>
         </div>
+      </div>
+    );
+  }
 
-
-        {
-          showKeyModal && (
-            <KeyEntryModal
-              onKeySubmit={handleKeySubmit}
-              onCancel={cancelKeyEntry}
-              error={isDecrypting ? "Decrypting... Please wait." : error} // Simple reused error prop usage or separate status
-            />
-          )
-        }
-
-        {
-          isDecrypting && !showKeyModal && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-              <div className="bg-white p-6 rounded-xl flex items-center space-x-4">
-                <Loader className="animate-spin text-green-600" />
-                <span className="font-medium text-gray-700">{progressStatus}</span>
-              </div>
-            </div>
-          )
-        }
-      </div >
+  if (status === 'error') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-green-500 to-teal-600 flex items-center justify-center p-4">
+        <div className="bg-white rounded-xl shadow-2xl p-8 max-w-lg w-full text-center">
+          <div className="bg-red-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 text-red-600">
+            <AlertCircle size={40} />
+          </div>
+          <h1 className="text-2xl font-bold text-gray-800 mb-2">Backup Not Loaded</h1>
+          <p className="text-gray-500 mb-6">
+            The server couldn't load your WhatsApp backup. This is configured entirely via environment
+            variables — there's nothing to upload here.
+          </p>
+          <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-4 text-left text-sm mb-6">
+            {statusError}
+          </div>
+          <div className="text-left text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-1">
+            <p className="font-medium text-gray-600 mb-2">Check on the server:</p>
+            <p>
+              <code className="bg-gray-200 px-1 rounded">WA_BACKUP_DIR</code> points to a folder containing your{' '}
+              <code className="bg-gray-200 px-1 rounded">msgstore.db</code> /{' '}
+              <code className="bg-gray-200 px-1 rounded">.crypt12/14/15</code> file
+            </p>
+            <p>
+              <code className="bg-gray-200 px-1 rounded">WA_BACKUP_KEY_HEX</code> is set to your 64-character hex
+              recovery key (only needed for encrypted backups)
+            </p>
+          </div>
+        </div>
+      </div>
     );
   }
 
@@ -238,6 +136,7 @@ const App: React.FC = () => {
         <div className="flex items-center space-x-2 text-green-700 font-semibold">
           <Database size={18} />
           <span>WA Viewer Pro</span>
+          {fileName && <span className="text-xs text-gray-400 font-normal">({fileName})</span>}
         </div>
 
         <div className="flex items-center space-x-4 text-xs">
@@ -259,14 +158,15 @@ const App: React.FC = () => {
               className="w-16 border rounded px-2 py-1 bg-gray-50 focus:ring-1 focus:ring-green-500 outline-none"
             />
           </div>
-          <button
-            onClick={() => setDbLoaded(false)}
-            className="text-red-500 hover:text-red-700 font-medium px-2"
-          >
-            Close File
-          </button>
         </div>
       </div>
+
+      {error && (
+        <div className="bg-red-50 border-b border-red-200 text-red-700 px-4 py-2 text-sm flex items-center">
+          <AlertCircle size={16} className="mr-2 flex-shrink-0" />
+          {error}
+        </div>
+      )}
 
       {/* Main Content Area */}
       <div className="flex flex-1 overflow-hidden relative">
@@ -278,11 +178,7 @@ const App: React.FC = () => {
           />
         </div>
         <div className={`${!selectedChat ? 'hidden md:flex' : 'flex'} flex-1 h-full min-w-0 bg-[#efeae2] relative`}>
-          <ChatWindow
-            conversation={selectedChat}
-            messages={messages}
-            loading={loadingMessages}
-          />
+          <ChatWindow conversation={selectedChat} messages={messages} loading={loadingMessages} />
           {/* Mobile Back Button Overlay */}
           {selectedChat && (
             <button

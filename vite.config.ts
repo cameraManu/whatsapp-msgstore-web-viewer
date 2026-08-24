@@ -1,19 +1,19 @@
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import { backupFolderPlugin } from './vite-backup-plugin';
 
 // https://vitejs.dev/config/
-export default defineConfig(({ mode }) => {
-  // Loads .env / .env.local so WA_BACKUP_DIR is available to the dev-server
-  // middleware (server-side only — never sent to the browser bundle).
-  // Real environment variables (e.g. set by Docker Compose) take precedence
-  // over values from .env files, so WA_BACKUP_DIR=/backup set in
-  // docker-compose.yml isn't overwritten by an empty value in a mounted .env.
-  const fileEnv = loadEnv(mode, process.cwd(), '');
-  process.env = { ...fileEnv, ...process.env };
+// Server-side build: in production (Docker), the Express server (server/index.ts)
+// serves both the built frontend and /api/* on one port — this config isn't
+// used there. This config is only for local frontend development: run the
+// Express API on API_PORT (default 3001) with `npm run server:dev`, and this
+// Vite dev server proxies /api/* to it.
+const API_PORT = process.env.API_PORT || 3001;
 
-  return {
-    plugins: [react(), backupFolderPlugin()],
-    base: '/whatsapp-msgstore-web-viewer/',
-  };
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    proxy: {
+      '/api': `http://localhost:${API_PORT}`,
+    },
+  },
 });

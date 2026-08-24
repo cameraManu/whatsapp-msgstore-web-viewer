@@ -1,21 +1,36 @@
-# Runs the app in Vite dev mode inside Docker, for occasional local use.
-# Not intended to be exposed to the internet — this is a dev server, not a
-# production build.
+# Server-side build: decrypts and serves the WhatsApp backup entirely on the
+# server (better-sqlite3 + node:crypto). The browser only ever receives
+# already-decrypted JSON — no upload, no client-side decryption.
+
+FROM node:20-alpine AS builder
+
+# better-sqlite3 needs to compile a native addon against this Alpine/musl target
+RUN apk add --no-cache python3 make g++
+
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+RUN npm install
+
+COPY . .
+
+RUN npm run build \
+ && npm run build:server \
+ && npm prune --omit=dev
+
 
 FROM node:20-alpine
 
 WORKDIR /app
 
-# Install dependencies first for better layer caching
-COPY package.json package-lock.json ./
-RUN npm ci
-
-# Copy the rest of the project (bind mount in docker-compose.yml overrides
-# this at runtime for live-reload during development)
-COPY . .
+# Reuse the already-compiled node_modules (including the native better-sqlite3
+# addon) from the builder stage instead of recompiling — keeps this final
+# image free of the python3/make/g++ toolchain.
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/server-dist ./server-dist
 
 EXPOSE 5173
 
-# --host so the dev server is reachable from outside the container,
-# --port to pin it explicitly.
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
+CMD ["node", "server-dist/index.js"]

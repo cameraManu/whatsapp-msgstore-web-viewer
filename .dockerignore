@@ -1,6 +1,8 @@
 node_modules
 dist
 dist-ssr
+server-dist
+_deprecated-client-side
 .git
 .github
 *.local

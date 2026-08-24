@@ -10,6 +10,7 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+server-dist
 *.local
 
 # Local backup-folder configuration (contains a personal filesystem path)

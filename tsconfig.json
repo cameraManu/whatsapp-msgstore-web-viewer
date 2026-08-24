@@ -25,5 +25,7 @@
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
-  }
+  },
+  "include": ["App.tsx", "index.tsx", "components/**/*", "types.ts", "vite.config.ts"],
+  "exclude": ["server/**/*", "_deprecated-client-side/**/*", "node_modules", "dist", "server-dist"]
 }

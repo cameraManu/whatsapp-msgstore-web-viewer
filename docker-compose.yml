@@ -9,9 +9,10 @@ services:
       - "5173:5173"
     environment:
       # Path INSIDE the container where your backup folder is mounted below.
-      # Do not put your host path here — set the host path in the volume
-      # mapping instead (left side of the ":" below).
       - WA_BACKUP_DIR=/backup
+      # Your 64-character hex WhatsApp E2E backup recovery key. Required only
+      # if the file found in /backup is encrypted (.crypt12/14/15).
+      - WA_BACKUP_KEY_HEX=${WA_BACKUP_KEY_HEX:-}
     volumes:
       # --- Point this at your real WhatsApp backup folder on the host ---
       # Set WA_BACKUP_HOST_DIR in .env (see .env.example). If unset, this
