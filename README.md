@@ -77,6 +77,52 @@ Pull requests are welcome! If you want to contribute or run this on your own mac
     npm run build
     ```
 
+## Linking a Local Backup Folder (optional, dev-only)
+
+Instead of clicking the upload box every time, you can point the app at a folder on your machine (e.g. wherever you keep your `msgstore.db` / `.crypt15` / key file exports) and open files straight from there.
+
+1.  Copy `.env.example` to `.env` in the project root (this file is git-ignored, so your path stays local).
+2.  Set `WA_BACKUP_DIR` to the folder's full path, e.g.:
+    ```
+    WA_BACKUP_DIR=C:\Users\YourName\Documents\WhatsAppBackup
+    ```
+3.  Restart `npm run dev`.
+4.  On the landing screen, a "Backup folder" panel appears below the upload box, listing matching files found in that folder (recursively, a few levels deep). Click one to open it directly — no upload dialog.
+
+Notes:
+*   This only works with `npm run dev` (a small Vite dev-server middleware reads the folder). The deployed GitHub Pages demo has no backend, so it always uses the manual upload/drag-and-drop flow.
+*   Files are still only read and processed locally — the middleware simply streams bytes from disk to the page on your own machine; nothing leaves your computer.
+*   The panel recognizes `.db`, `.crypt12`, `.crypt14`, `.crypt15`, and files that look like decryption keys (e.g. named `key` or `*.key`).
+
+## Running with Docker / Dockhand
+
+This spins up the Vite **dev server** in a container — intended for occasional local use (e.g. via Dockhand), not for exposing on the internet. It keeps the backup-folder feature above working.
+
+1.  Copy `.env.example` to `.env` in the project root and set `WA_BACKUP_HOST_DIR` to your backup folder's path (forward slashes, even on Windows):
+    ```
+    WA_BACKUP_HOST_DIR=C:/Users/YourName/Documents/WhatsAppBackup
+    ```
+    (`WA_BACKUP_DIR` in the same file is only used for running `npm run dev` directly on the host, without Docker — you can leave it blank.)
+
+2.  Start it:
+    ```bash
+    docker compose up -d --build
+    ```
+
+3.  Open **http://localhost:5173/whatsapp-msgstore-web-viewer/**
+
+4.  Stop it:
+    ```bash
+    docker compose down
+    ```
+
+**Deploying via Dockhand ("Deploy from Git"):** point it at this repository, leave the compose file path as the default (`docker-compose.yml`), and add `WA_BACKUP_HOST_DIR` as an environment variable in Dockhand's deploy dialog, set to the backup folder path on the host running Dockhand. Leave scheduled sync / webhook off unless you specifically want automatic redeploys.
+
+Notes:
+*   The container only binds to `127.0.0.1:5173` on the host, so it isn't reachable from other machines on your network by default.
+*   The compose file bind-mounts the project source into the container for live-reload; your backup folder is mounted **read-only** at `/backup` inside the container.
+*   If `WA_BACKUP_HOST_DIR` is left unset, the container still starts (using a harmless empty placeholder folder) — the app will just show no linked backup files until you set it.
+
 ## License
 
 Open source. Feel free to fork and improve!

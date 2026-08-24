@@ -1,0 +1,23 @@
+services:
+  whatsapp-viewer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: whatsapp-msgstore-web-viewer
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    environment:
+      # Path INSIDE the container where your backup folder is mounted below.
+      # Do not put your host path here — set the host path in the volume
+      # mapping instead (left side of the ":" below).
+      - WA_BACKUP_DIR=/backup
+    volumes:
+      # Live-reload source mount. Comment out for a static "just run it" setup.
+      - .:/app
+      - /app/node_modules
+
+      # --- Point this at your real WhatsApp backup folder on the host ---
+      # Set WA_BACKUP_HOST_DIR in .env (see .env.example). If unset, this
+      # mounts an empty local folder so `docker compose up` still works.
+      - ${WA_BACKUP_HOST_DIR:-./.docker-empty-backup}:/backup:ro

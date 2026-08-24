@@ -6,6 +6,7 @@ import { Conversation, Message } from './types';
 import { Database, Upload, AlertCircle, Download, Key, Loader } from 'lucide-react';
 import { detectEncryptionType, extractKey, decryptDatabase, EncryptionType } from './services/encryptionService';
 import { KeyEntryModal } from './components/KeyEntryModal';
+import { BackupFolderPanel } from './components/BackupFolderPanel';
 
 const App: React.FC = () => {
   const [dbLoaded, setDbLoaded] = useState(false);
@@ -194,6 +195,8 @@ const App: React.FC = () => {
               Download sample msgstore.db
             </a>
           </div>
+
+          <BackupFolderPanel onFileSelected={processFile} />
 
           {error && (
             <div className="mt-6 p-4 bg-red-50 text-red-700 rounded-lg flex items-start text-left text-sm border border-red-200">
