@@ -71,7 +71,16 @@ const MediaContent: React.FC<{ message: Message }> = ({ message }) => {
   }
 
   if (isAudio(message.media_mime, message.media_path)) {
-    return <audio src={src} controls preload="metadata" className="w-full mb-1" onError={() => setFailed(true)} />;
+    return (
+      <audio
+        src={src}
+        controls
+        preload="metadata"
+        className="mb-1"
+        style={{ width: '100%', minWidth: '260px' }}
+        onError={() => setFailed(true)}
+      />
+    );
   }
 
   // Generic document / unknown type — offer it as a download link.
