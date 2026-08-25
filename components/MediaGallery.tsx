@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { X, FileText, Image as ImageIcon } from 'lucide-react';
+import { ImageLightbox } from './ImageLightbox';
 
 interface MediaGalleryItem {
   _id: number;
@@ -75,9 +76,21 @@ const GalleryViewer: React.FC<{ item: MediaGalleryItem; chatName: string; onClos
   const src = `/api/media/${item._id}`;
   const senderLabel = item.from_me ? 'You' : chatName;
 
+  // Images get the full zoomable lightbox (pinch/scroll/drag). Its own header
+  // has zoom controls + close, so we skip rendering a second header for images
+  // to avoid two overlapping close buttons — the sender/date context is a
+  // minor loss here in exchange for a much more useful zoom experience.
+  if (isImage(item.media_mime, item.media_path)) {
+    return <ImageLightbox src={src} alt={item.media_caption || 'Image'} onClose={onClose} />;
+  }
+
   return (
     <div className="fixed inset-0 bg-black/95 z-[60] flex flex-col" onClick={onClose}>
-      <div className="flex items-center justify-between p-4 text-white flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="flex items-center justify-between p-4 text-white flex-shrink-0"
+        style={{ paddingTop: 'calc(env(safe-area-inset-top) + 16px)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div>
           <div className="text-sm font-medium">{senderLabel}</div>
           <div className="text-xs text-white/60">{formatDate(item.timestamp)}</div>
@@ -87,9 +100,7 @@ const GalleryViewer: React.FC<{ item: MediaGalleryItem; chatName: string; onClos
         </button>
       </div>
       <div className="flex-1 flex items-center justify-center p-4 overflow-hidden" onClick={(e) => e.stopPropagation()}>
-        {isImage(item.media_mime, item.media_path) ? (
-          <img src={src} alt="" className="max-w-full max-h-full object-contain" />
-        ) : isVideo(item.media_mime, item.media_path) ? (
+        {isVideo(item.media_mime, item.media_path) ? (
           <video src={src} controls autoPlay className="max-w-full max-h-full" />
         ) : isAudio(item.media_mime, item.media_path) ? (
           <audio src={src} controls autoPlay className="w-full max-w-md" />

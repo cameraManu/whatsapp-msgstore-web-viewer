@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Message } from '../types';
-import { Check, Image as ImageIcon, FileText, AlertTriangle, X } from 'lucide-react';
+import { Check, Image as ImageIcon, FileText, AlertTriangle } from 'lucide-react';
+import { ImageLightbox } from './ImageLightbox';
 
 interface MessageBubbleProps {
   message: Message;
@@ -12,20 +13,6 @@ const isVideo = (mime: string | null, path: string | null) =>
   (mime && mime.startsWith('video/')) || (path && /\.(mp4|3gp|mov)$/i.test(path));
 const isAudio = (mime: string | null, path: string | null) =>
   (mime && mime.startsWith('audio/')) || (path && /\.(opus|ogg|m4a|mp3|amr)$/i.test(path));
-
-/** Fullscreen lightbox for viewing an image at full size. */
-const ImageLightbox: React.FC<{ src: string; alt: string; onClose: () => void }> = ({ src, alt, onClose }) => (
-  <div className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center p-4" onClick={onClose}>
-    <button
-      onClick={onClose}
-      className="absolute top-4 right-4 text-white/80 hover:text-white p-2"
-      aria-label="Close"
-    >
-      <X size={28} />
-    </button>
-    <img src={src} alt={alt} className="max-w-full max-h-full object-contain" onClick={(e) => e.stopPropagation()} />
-  </div>
-);
 
 const MediaContent: React.FC<{ message: Message }> = ({ message }) => {
   const [failed, setFailed] = useState(false);
